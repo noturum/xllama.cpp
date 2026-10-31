@@ -1,13 +1,12 @@
-name: CI (CUDA, windows(only 13.4))
+name: CI (CUDA, windows)
 
 on:
-  workflow_dispatch: # allows manual triggering
+  workflow_dispatch:
 
 permissions:
   actions: write
   contents: read
 
-# note: this will run in queue with the release workflow
 concurrency:
   group: release
   queue: max
@@ -19,6 +18,13 @@ env:
   LLAMA_ARG_LOG_COLORS: 1
   LLAMA_ARG_LOG_PREFIX: 1
   LLAMA_ARG_LOG_TIMESTAMPS: 1
+  CMAKE_ARGS: >-
+    -DLLAMA_BUILD_EXAMPLES=OFF
+    -DLLAMA_BUILD_TESTS=OFF
+    -DLLAMA_BUILD_TOOLS=ON
+    -DLLAMA_BUILD_SERVER=ON
+    -DGGML_RPC=ON
+    -DLLAMA_CONNECT=ON
 
 jobs:
   cuda:
@@ -66,16 +72,24 @@ jobs:
             -DGGML_NATIVE=OFF ^
             -DGGML_CPU=OFF ^
             -DGGML_CUDA=ON ^
-            -DLLAMA_BUILD_BORINGSSL=ON ${{ matrix.defines }}
+            -DLLAMA_BUILD_BORINGSSL=ON ^
+            ${{ matrix.defines }} ^
+            ${{ env.CMAKE_ARGS }}
           set /A NINJA_JOBS=%NUMBER_OF_PROCESSORS%-1
-          cmake --build build --config Release -j %NINJA_JOBS% --target ggml-cuda
+          cmake --build build --config Release -j %NINJA_JOBS%
 
-      - name: Upload CUDA artifacts
+      - name: Pack artifacts
+        id: pack_artifacts
+        shell: cmd
+        run: |
+          7z a -snl llama-bin-win-cuda-${{ matrix.cuda }}-${{ matrix.arch }}.zip .\build\bin\Release\*
+
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: windows-cuda-${{ matrix.cuda }}-${{ matrix.arch }}
-          path: build/bin/Release/
-          if-no-files-found: error
+          name: llama-bin-win-cuda-${{ matrix.cuda }}-${{ matrix.arch }}
+          path: llama-bin-win-cuda-${{ matrix.cuda }}-${{ matrix.arch }}.zip
+          archive: false
 
       - name: ccache-clear
         uses: ./.github/actions/ccache-clear
