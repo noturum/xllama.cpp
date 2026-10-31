@@ -1,0 +1,83 @@
+name: CI (CUDA, windows(only 13.4))
+
+on:
+  workflow_dispatch: # allows manual triggering
+
+permissions:
+  actions: write
+  contents: read
+
+# note: this will run in queue with the release workflow
+concurrency:
+  group: release
+  queue: max
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GGML_NLOOP: 3
+  GGML_N_THREADS: 1
+  LLAMA_ARG_LOG_COLORS: 1
+  LLAMA_ARG_LOG_PREFIX: 1
+  LLAMA_ARG_LOG_TIMESTAMPS: 1
+
+jobs:
+  cuda:
+    name: windows-cuda (13.4, x64)
+    runs-on: windows-2022
+
+    permissions:
+      actions: write
+
+    strategy:
+      matrix:
+        include:
+          - cuda: '13.4'
+            arch: x64
+            defines: '-DGGML_CUDA_CCCL_VERSION=v3.4.3'
+
+    steps:
+      - name: Clone
+        id: checkout
+        uses: actions/checkout@v6
+
+      - name: ccache
+        uses: ggml-org/ccache-action@v1.2.24
+        with:
+          key: release-windows-2022-${{ matrix.arch }}-cuda-${{ matrix.cuda }}
+
+      - name: Install Cuda Toolkit
+        uses: ./.github/actions/windows-setup-cuda
+        with:
+          cuda_version: ${{ matrix.cuda }}
+          cuda_arch: ${{ matrix.arch }}
+
+      - name: Install Ninja
+        id: install_ninja
+        run: |
+          choco install ninja
+
+      - name: Build
+        id: cmake_build
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+          cmake -S . -B build -G "Ninja Multi-Config" ^
+            -DGGML_BACKEND_DL=ON ^
+            -DGGML_NATIVE=OFF ^
+            -DGGML_CPU=OFF ^
+            -DGGML_CUDA=ON ^
+            -DLLAMA_BUILD_BORINGSSL=ON ${{ matrix.defines }}
+          set /A NINJA_JOBS=%NUMBER_OF_PROCESSORS%-1
+          cmake --build build --config Release -j %NINJA_JOBS% --target ggml-cuda
+
+      - name: Upload CUDA artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cuda-${{ matrix.cuda }}-${{ matrix.arch }}
+          path: build/bin/Release/
+          if-no-files-found: error
+
+      - name: ccache-clear
+        uses: ./.github/actions/ccache-clear
+        with:
+          key: release-windows-2022-${{ matrix.arch }}-cuda-${{ matrix.cuda }}
